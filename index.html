@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>BreatheBot - Air Quality Monitor</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background: #f0f4f8;
+    }
+    header {
+      background-color: #1e3a8a;
+      color: white;
+      padding: 1rem;
+      text-align: center;
+    }
+    .intro {
+      padding: 1rem 2rem;
+      background: #e0f2fe;
+      text-align: center;
+    }
+    #searchBar {
+      display: flex;
+      justify-content: center;
+      padding: 1rem;
+    }
+    #searchInput {
+      padding: 0.5rem;
+      width: 60%;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+      font-size: 1rem;
+    }
+    #map {
+      height: 80vh;
+      width: 100%;
+    }
+    .legend {
+      background: white;
+      padding: 10px;
+      line-height: 1.5;
+      font-size: 14px;
+    }
+    .legend div {
+      margin-bottom: 5px;
+    }
+    .color-box {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>BreatheBot</h1>
+    <p>Real-Time Air Quality Monitoring System</p>
+  </header>
+
+  <section class="intro">
+    <h2>What is BreatheBot?</h2>
+    <p>
+      BreatheBot is a drone-based air quality monitoring system. It collects real-time data like PM2.5, CO, NO₂ using onboard sensors and displays it live on this map. Stay informed. Breathe safe.
+    </p>
+  </section>
+
+  <div id="searchBar">
+    <input id="searchInput" type="text" placeholder="Enter place name or coordinates (e.g., 16.5, 80.6)" />
+  </div>
+
+  <div id="map"></div>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <!-- Geocoding using Nominatim (OpenStreetMap) -->
+  <script>
+    // Firebase config
+    var firebaseConfig = {
+      apiKey: "AIzaSyCT80Kyw3mn2MqWZViDHsJcMDTgTcnlBEM",
+      authDomain: "rpi-to-pyrebase.firebaseapp.com",
+      databaseURL: "https://rpi-to-pyrebase-default-rtdb.firebaseio.com/",
+      projectId: "rpi-to-pyrebase",
+      storageBucket: "rpi-to-pyrebase.appspot.com",
+      messagingSenderId: "123456789",
+      appId: "1:123456789:web:example"
+    };
+    firebase.initializeApp(firebaseConfig);
+
+    const map = L.map('map').setView([16.5, 80.6], 7);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    function getColor(pm25) {
+      if (pm25 <= 50) return "green";
+      if (pm25 <= 100) return "yellow";
+      if (pm25 <= 150) return "orange";
+      if (pm25 <= 200) return "red";
+      return "purple";
+    }
+
+    function addLegend() {
+      const legend = L.control({ position: 'bottomright' });
+      legend.onAdd = function () {
+        const div = L.DomUtil.create('div', 'legend');
+        div.innerHTML = `
+          <strong>AQI Color Legend</strong><br>
+          <div><span class="color-box" style="background:green"></span> Good (0-50)</div>
+          <div><span class="color-box" style="background:yellow"></span> Moderate (51–100)</div>
+          <div><span class="color-box" style="background:orange"></span> Unhealthy for Sensitive Groups (101–150)</div>
+          <div><span class="color-box" style="background:red"></span> Unhealthy (151–200)</div>
+          <div><span class="color-box" style="background:purple"></span> Very Unhealthy (201+)</div>
+        `;
+        return div;
+      };
+      legend.addTo(map);
+    }
+
+    function loadAQIMarkers() {
+      const dbRef = firebase.database().ref("locations");
+      dbRef.on("value", (snapshot) => {
+        const data = snapshot.val();
+        for (let loc in data) {
+          const aqi = data[loc];
+          const marker = L.circleMarker([aqi.lat, aqi.lng], {
+            radius: 10,
+            fillColor: getColor(aqi.PM25),
+            color: "#000",
+            weight: 1,
+            opacity: 1,
+            fillOpacity: 0.8,
+          }).addTo(map);
+
+          marker.bindPopup(
+            `<strong>${loc}</strong><br>PM2.5: ${aqi.PM25}<br>CO: ${aqi.CO}<br>NO₂: ${aqi.NO2}`
+          );
+        }
+      });
+    }
+
+    function setupSearch() {
+      const input = document.getElementById("searchInput");
+      input.addEventListener("keypress", function (e) {
+        if (e.key === "Enter") {
+          const query = input.value.trim();
+          if (/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(query)) {
+            // Coordinate input
+            const [lat, lng] = query.split(",").map(Number);
+            map.setView([lat, lng], 14);
+          } else {
+            // Place name
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`)
+              .then(response => response.json())
+              .then(results => {
+                if (results.length > 0) {
+                  const place = results[0];
+                  map.setView([place.lat, place.lon], 14);
+                } else {
+                  alert("Location not found.");
+                }
+              });
+          }
+        }
+      });
+    }
+
+    loadAQIMarkers();
+    setupSearch();
+    addLegend();
+  </script>
+</body>
+</html>
+
+
+
+
+
